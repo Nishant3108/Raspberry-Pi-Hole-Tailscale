@@ -87,8 +87,8 @@ network-guardian/
 
 ### Step 1 — Clone this repo
 ```bash
-git clone https://github.com/Nishant3108/Pi-hole-Tailscale.git
-cd Pi-hole-Tailscale
+git clone https://github.com/Nishant3108/Raspberry-Pi-hole-Tailscale.git
+cd Raspberry-Pi-hole-Tailscale
 ```
 
 ### Step 2 — Set your Pi-hole password
