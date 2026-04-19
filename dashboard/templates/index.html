@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi-Hole Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --green: #00ff41;
+            --green-dim: #00cc33;
+            --green-dark: #003311;
+            --green-glow: rgba(0, 255, 65, 0.15);
+            --red: #ff2442;
+            --amber: #ffaa00;
+            --blue: #00cfff;
+            --bg: #000000;
+            --panel: rgba(0, 20, 5, 0.85);
+            --border: rgba(0, 255, 65, 0.25);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: var(--bg);
+            color: var(--green);
+            font-family: 'Share Tech Mono', monospace;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Matrix rain canvas */
+        #matrix-canvas {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            opacity: 0.07;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* Scanline overlay */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.08) 2px,
+                rgba(0, 0, 0, 0.08) 4px
+            );
+            pointer-events: none;
+            z-index: 999;
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 30px 0 20px;
+            position: relative;
+        }
+
+        .header-badge {
+            display: inline-block;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 11px;
+            color: var(--green-dim);
+            letter-spacing: 4px;
+            margin-bottom: 10px;
+            animation: blink 2s step-end infinite;
+        }
+
+        @keyframes blink {
+            50% { opacity: 0.3; }
+        }
+
+        .header h1 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: clamp(28px, 5vw, 56px);
+            font-weight: 900;
+            color: var(--green);
+            text-shadow: 0 0 20px var(--green), 0 0 60px rgba(0,255,65,0.3);
+            letter-spacing: 6px;
+            line-height: 1;
+        }
+
+        .header-sub {
+            font-size: 11px;
+            color: var(--green-dim);
+            letter-spacing: 8px;
+            margin-top: 8px;
+            opacity: 0.7;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 16px;
+            font-size: 11px;
+            color: var(--green-dim);
+            letter-spacing: 2px;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--green);
+            box-shadow: 0 0 8px var(--green);
+            margin-right: 6px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .status-dot.red { background: var(--red); box-shadow: 0 0 8px var(--red); }
+        .status-dot.amber { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Divider */
+        .divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 20px 0;
+            position: relative;
+        }
+
+        .divider::before {
+            content: '◆ LIVE NETWORK TELEMETRY ◆';
+            position: absolute;
+            top: -8px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg);
+            padding: 0 16px;
+            font-size: 10px;
+            letter-spacing: 4px;
+            color: var(--green-dim);
+        }
+
+        /* Main stats grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0;
+            width: 3px; height: 100%;
+            background: var(--green);
+            box-shadow: 0 0 10px var(--green);
+        }
+
+        .stat-card:hover {
+            border-color: var(--green);
+            box-shadow: 0 0 20px var(--green-glow), inset 0 0 20px var(--green-glow);
+        }
+
+        .stat-card.danger::before { background: var(--red); box-shadow: 0 0 10px var(--red); }
+        .stat-card.amber::before { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+        .stat-card.blue::before { background: var(--blue); box-shadow: 0 0 10px var(--blue); }
+
+        .stat-label {
+            font-size: 9px;
+            letter-spacing: 3px;
+            color: var(--green-dim);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .stat-value {
+            font-family: 'Orbitron', sans-serif;
+            font-size: clamp(24px, 3vw, 40px);
+            font-weight: 700;
+            color: var(--green);
+            text-shadow: 0 0 15px rgba(0,255,65,0.5);
+            line-height: 1;
+            transition: all 0.5s;
+        }
+
+        .stat-card.danger .stat-value { color: var(--red); text-shadow: 0 0 15px rgba(255,36,66,0.5); }
+        .stat-card.amber .stat-value { color: var(--amber); text-shadow: 0 0 15px rgba(255,170,0,0.5); }
+        .stat-card.blue .stat-value { color: var(--blue); text-shadow: 0 0 15px rgba(0,207,255,0.5); }
+
+        .stat-sub {
+            font-size: 10px;
+            color: var(--green-dim);
+            margin-top: 6px;
+            opacity: 0.6;
+        }
+
+        /* Progress bar */
+        .progress-wrap {
+            margin-top: 10px;
+            height: 3px;
+            background: rgba(0,255,65,0.1);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: var(--green);
+            box-shadow: 0 0 8px var(--green);
+            transition: width 1s ease;
+            border-radius: 2px;
+        }
+
+        .stat-card.danger .progress-bar { background: var(--red); box-shadow: 0 0 8px var(--red); }
+        .stat-card.amber .progress-bar { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+
+        /* Middle section */
+        .mid-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 20px;
+            position: relative;
+        }
+
+        .panel-title {
+            font-size: 9px;
+            letter-spacing: 4px;
+            color: var(--green-dim);
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-title::before {
+            content: '▶';
+            color: var(--green);
+            font-size: 8px;
+        }
+
+        /* Query type breakdown */
+        .query-type-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(0,255,65,0.05);
+            font-size: 11px;
+        }
+
+        .query-type-row:last-child { border-bottom: none; }
+
+        .query-type-name { color: var(--green-dim); }
+        .query-type-val {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 13px;
+            color: var(--green);
+        }
+
+        .query-type-bar {
+            height: 2px;
+            background: var(--green);
+            box-shadow: 0 0 4px var(--green);
+            margin-top: 3px;
+            transition: width 1s ease;
+        }
+
+        /* Cache vs forwarded donut-style display */
+        .ratio-display {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 8px;
+        }
+
+        .ratio-row {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .ratio-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: var(--green-dim);
+        }
+
+        .ratio-bar-wrap {
+            height: 4px;
+            background: rgba(0,255,65,0.1);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .ratio-bar {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 1s ease;
+        }
+
+        .ratio-bar.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+        .ratio-bar.blue { background: var(--blue); box-shadow: 0 0 6px var(--blue); }
+        .ratio-bar.amber { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+        .ratio-bar.red { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+        /* Gravity / blocklist panel */
+        .big-number {
+            font-family: 'Orbitron', sans-serif;
+            font-size: clamp(20px, 2.5vw, 32px);
+            font-weight: 700;
+            color: var(--amber);
+            text-shadow: 0 0 15px rgba(255,170,0,0.4);
+            margin: 8px 0;
+        }
+
+        .gravity-sub {
+            font-size: 10px;
+            color: var(--green-dim);
+            opacity: 0.6;
+            line-height: 1.6;
+        }
+
+        /* Bottom row */
+        .bottom-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        /* Terminal log */
+        .terminal {
+            background: rgba(0,10,2,0.9);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 16px;
+            font-size: 11px;
+            line-height: 1.8;
+            max-height: 180px;
+            overflow-y: auto;
+        }
+
+        .terminal::-webkit-scrollbar { width: 3px; }
+        .terminal::-webkit-scrollbar-track { background: transparent; }
+        .terminal::-webkit-scrollbar-thumb { background: var(--green-dim); }
+
+        .log-line { opacity: 0.7; }
+        .log-line .ts { color: var(--green-dim); margin-right: 8px; }
+        .log-line .msg { color: var(--green); }
+        .log-line.warn .msg { color: var(--amber); }
+        .log-line.err .msg { color: var(--red); }
+
+        /* Reply types grid */
+        .reply-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+
+        .reply-cell {
+            background: rgba(0,255,65,0.03);
+            border: 1px solid rgba(0,255,65,0.1);
+            padding: 8px;
+            text-align: center;
+            border-radius: 2px;
+        }
+
+        .reply-cell-val {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 16px;
+            color: var(--green);
+        }
+
+        .reply-cell-label {
+            font-size: 9px;
+            color: var(--green-dim);
+            margin-top: 3px;
+            letter-spacing: 1px;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 20px;
+            font-size: 10px;
+            color: var(--green-dim);
+            opacity: 0.4;
+            letter-spacing: 3px;
+        }
+
+        /* Corner decorations */
+        .panel::after, .stat-card::after {
+            content: '';
+            position: absolute;
+            bottom: 0; right: 0;
+            width: 8px; height: 8px;
+            border-bottom: 1px solid var(--green-dim);
+            border-right: 1px solid var(--green-dim);
+            opacity: 0.3;
+        }
+
+        /* Update flash */
+        @keyframes flash {
+            0% { opacity: 1; }
+            50% { opacity: 0.3; }
+            100% { opacity: 1; }
+        }
+
+        .updating { animation: flash 0.3s ease; }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .mid-grid { grid-template-columns: 1fr; }
+            .bottom-grid { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 500px) {
+            .stats-grid { grid-template-columns: 1fr 1fr; }
+        }
+
+        /* Cursor blink in header */
+        .cursor {
+            display: inline-block;
+            width: 3px;
+            height: 1em;
+            background: var(--green);
+            margin-left: 4px;
+            vertical-align: middle;
+            animation: blink 1s step-end infinite;
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="matrix-canvas"></canvas>
+
+<div class="container">
+
+    <!-- Header -->
+    <div class="header">
+        <div class="header-badge">[ SYSTEM ACTIVE ]</div>
+        <h1>Pi-Hole Dashboard<span class="cursor"></span></h1>
+        <div class="status-bar">
+            <span><span class="status-dot"></span>PI-HOLE ONLINE</span>
+            <span><span class="status-dot"></span>TAILSCALE VPN ACTIVE</span>
+            <span><span class="status-dot amber"></span>MONITORING</span>
+            <span id="last-update">LAST UPDATE: --</span>
+        </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Top Stats -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">Total Queries Today</div>
+            <div class="stat-value" id="total-today">--</div>
+            <div class="stat-sub" id="total-sub">DNS requests processed</div>
+            <div class="progress-wrap"><div class="progress-bar" id="total-bar" style="width:100%"></div></div>
+        </div>
+        <div class="stat-card danger">
+            <div class="stat-label">Blocked Today</div>
+            <div class="stat-value" id="blocked-today">--</div>
+            <div class="stat-sub" id="blocked-sub">Threats intercepted</div>
+            <div class="progress-wrap"><div class="progress-bar" id="blocked-bar" style="width:0%"></div></div>
+        </div>
+        <div class="stat-card amber">
+            <div class="stat-label">Block Rate</div>
+            <div class="stat-value" id="percent-today">--%</div>
+            <div class="stat-sub">Of all DNS queries</div>
+            <div class="progress-wrap"><div class="progress-bar" id="percent-bar" style="width:0%"></div></div>
+        </div>
+        <div class="stat-card blue">
+            <div class="stat-label">Active Clients</div>
+            <div class="stat-value" id="clients-active">--</div>
+            <div class="stat-sub" id="clients-sub">Devices on network</div>
+            <div class="progress-wrap"><div class="progress-bar" id="clients-bar" style="width:100%"></div></div>
+        </div>
+    </div>
+
+    <!-- Middle section -->
+    <div class="mid-grid">
+
+        <!-- Query types -->
+        <div class="panel">
+            <div class="panel-title">DNS Query Types</div>
+            <div id="query-types">
+                <div class="query-type-row">
+                    <div>
+                        <div class="query-type-name">A (IPv4)</div>
+                        <div class="query-type-bar" id="bar-A" style="width:0px"></div>
+                    </div>
+                    <div class="query-type-val" id="val-A">--</div>
+                </div>
+                <div class="query-type-row">
+                    <div>
+                        <div class="query-type-name">AAAA (IPv6)</div>
+                        <div class="query-type-bar" id="bar-AAAA" style="width:0px"></div>
+                    </div>
+                    <div class="query-type-val" id="val-AAAA">--</div>
+                </div>
+                <div class="query-type-row">
+                    <div>
+                        <div class="query-type-name">PTR (Reverse)</div>
+                        <div class="query-type-bar" id="bar-PTR" style="width:0px"></div>
+                    </div>
+                    <div class="query-type-val" id="val-PTR">--</div>
+                </div>
+                <div class="query-type-row">
+                    <div>
+                        <div class="query-type-name">SRV (Service)</div>
+                        <div class="query-type-bar" id="bar-SRV" style="width:0px"></div>
+                    </div>
+                    <div class="query-type-val" id="val-SRV">--</div>
+                </div>
+                <div class="query-type-row">
+                    <div>
+                        <div class="query-type-name">Unique Domains</div>
+                        <div class="query-type-bar" style="background: var(--amber); box-shadow: 0 0 4px var(--amber); width: 80px;"></div>
+                    </div>
+                    <div class="query-type-val" style="color:var(--amber)" id="val-unique">--</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cache vs Forwarded -->
+        <div class="panel">
+            <div class="panel-title">Query Resolution</div>
+            <div class="ratio-display">
+                <div class="ratio-row">
+                    <div class="ratio-label">
+                        <span>CACHED</span>
+                        <span id="cached-val">--</span>
+                    </div>
+                    <div class="ratio-bar-wrap">
+                        <div class="ratio-bar green" id="cached-bar" style="width:0%"></div>
+                    </div>
+                </div>
+                <div class="ratio-row">
+                    <div class="ratio-label">
+                        <span>FORWARDED</span>
+                        <span id="forwarded-val">--</span>
+                    </div>
+                    <div class="ratio-bar-wrap">
+                        <div class="ratio-bar blue" id="forwarded-bar" style="width:0%"></div>
+                    </div>
+                </div>
+                <div class="ratio-row">
+                    <div class="ratio-label">
+                        <span>BLOCKED</span>
+                        <span id="blocked-val2">--</span>
+                    </div>
+                    <div class="ratio-bar-wrap">
+                        <div class="ratio-bar red" id="blocked-bar2" style="width:0%"></div>
+                    </div>
+                </div>
+                <div class="ratio-row">
+                    <div class="ratio-label">
+                        <span>IN PROGRESS</span>
+                        <span id="inprogress-val">--</span>
+                    </div>
+                    <div class="ratio-bar-wrap">
+                        <div class="ratio-bar amber" id="inprogress-bar" style="width:0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gravity / Blocklist -->
+        <div class="panel">
+            <div class="panel-title">Blocklist Intelligence</div>
+            <div class="big-number" id="gravity-domains">--</div>
+            <div class="gravity-sub">domains in blocklist gravity database</div>
+            <br>
+            <div class="ratio-display">
+                <div class="ratio-row">
+                    <div class="ratio-label">
+                        <span>TOTAL CLIENTS SEEN</span>
+                        <span id="clients-total">--</span>
+                    </div>
+                    <div class="ratio-bar-wrap">
+                        <div class="ratio-bar green" id="clients-total-bar" style="width:100%"></div>
+                    </div>
+                </div>
+                <div class="ratio-row">
+                    <div class="ratio-label">
+                        <span>ACTIVE RIGHT NOW</span>
+                        <span id="clients-active2">--</span>
+                    </div>
+                    <div class="ratio-bar-wrap">
+                        <div class="ratio-bar amber" id="clients-active-bar" style="width:0%"></div>
+                    </div>
+                </div>
+            </div>
+            <br>
+            <div class="gravity-sub" id="gravity-updated">Blocklist last updated: --</div>
+        </div>
+
+    </div>
+
+    <!-- Bottom section -->
+    <div class="bottom-grid">
+
+        <!-- Reply types -->
+        <div class="panel">
+            <div class="panel-title">DNS Reply Types</div>
+            <div class="reply-grid">
+                <div class="reply-cell">
+                    <div class="reply-cell-val" id="reply-IP">--</div>
+                    <div class="reply-cell-label">IP</div>
+                </div>
+                <div class="reply-cell">
+                    <div class="reply-cell-val" id="reply-CNAME">--</div>
+                    <div class="reply-cell-label">CNAME</div>
+                </div>
+                <div class="reply-cell">
+                    <div class="reply-cell-val" id="reply-NODATA">--</div>
+                    <div class="reply-cell-label">NODATA</div>
+                </div>
+                <div class="reply-cell">
+                    <div class="reply-cell-val" id="reply-NXDOMAIN">--</div>
+                    <div class="reply-cell-label">NXDOMAIN</div>
+                </div>
+                <div class="reply-cell">
+                    <div class="reply-cell-val" id="reply-DOMAIN">--</div>
+                    <div class="reply-cell-label">DOMAIN</div>
+                </div>
+                <div class="reply-cell">
+                    <div class="reply-cell-val" id="reply-OTHER">--</div>
+                    <div class="reply-cell-label">OTHER</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live terminal log -->
+        <div class="panel">
+            <div class="panel-title">System Log</div>
+            <div class="terminal" id="terminal-log">
+                <div class="log-line"><span class="ts">[BOOT]</span><span class="msg">initializing...</span></div>
+                <div class="log-line"><span class="ts">[INIT]</span><span class="msg">Connecting to Pi-hole API...</span></div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+// ── Matrix Rain ────────────────────────────────────────────────────
+const canvas = document.getElementById('matrix-canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノ01アBCDEF0123456789';
+const fontSize = 14;
+const cols = Math.floor(canvas.width / fontSize);
+const drops = Array(cols).fill(1);
+
+function drawMatrix() {
+    ctx.fillStyle = 'rgba(0,0,0,0.05)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#00ff41';
+    ctx.font = fontSize + 'px Share Tech Mono';
+    drops.forEach((y, i) => {
+        const char = chars[Math.floor(Math.random() * chars.length)];
+        ctx.fillText(char, i * fontSize, y * fontSize);
+        if (y * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
+        drops[i]++;
+    });
+}
+setInterval(drawMatrix, 50);
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+});
+
+// ── Terminal Log ───────────────────────────────────────────────────
+const terminal = document.getElementById('terminal-log');
+function addLog(msg, type = '') {
+    const now = new Date().toTimeString().split(' ')[0];
+    const div = document.createElement('div');
+    div.className = `log-line ${type}`;
+    div.innerHTML = `<span class="ts">[${now}]</span><span class="msg"> ${msg}</span>`;
+    terminal.appendChild(div);
+    if (terminal.children.length > 20) terminal.removeChild(terminal.firstChild);
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────
+function setText(id, val) {
+    const el = document.getElementById(id);
+    if (el && el.textContent !== String(val)) {
+        el.classList.add('updating');
+        el.textContent = val;
+        setTimeout(() => el.classList.remove('updating'), 300);
+    }
+}
+
+function setBar(id, pct) {
+    const el = document.getElementById(id);
+    if (el) el.style.width = Math.min(100, Math.max(0, pct)) + '%';
+}
+
+function formatNum(n) {
+    if (n === undefined || n === null) return '--';
+    return Number(n).toLocaleString();
+}
+
+function timeAgo(ts) {
+    const diff = Math.floor(Date.now()/1000 - ts);
+    if (diff < 60) return diff + 's ago';
+    if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+    return Math.floor(diff/3600) + 'h ago';
+}
+
+// ── Fetch & Update ─────────────────────────────────────────────────
+async function updateStats() {
+    try {
+        const res = await fetch('/api/stats');
+        const d = await res.json();
+
+        if (d.error) {
+            addLog('API error: ' + d.error, 'err');
+            return;
+        }
+
+        const q = d.queries || {};
+        const c = d.clients || {};
+        const g = d.gravity || {};
+        const total = q.total || 0;
+
+        // Top stats
+        setText('total-today', formatNum(total));
+        setText('total-sub', `${formatNum(q.unique_domains || 0)} unique domains`);
+        setText('blocked-today', formatNum(q.blocked || 0));
+        setText('blocked-sub', `${(q.percent_blocked || 0).toFixed(1)}% block rate`);
+        setText('percent-today', (q.percent_blocked || 0).toFixed(1) + '%');
+        setText('clients-active', c.active || '--');
+        setText('clients-sub', `${c.total || '--'} total seen`);
+
+        setBar('blocked-bar', q.percent_blocked || 0);
+        setBar('percent-bar', q.percent_blocked || 0);
+
+        // Query types
+        const types = q.types || {};
+        const maxType = Math.max(types.A||0, types.AAAA||0, types.PTR||0, types.SRV||0, 1);
+        setText('val-A', formatNum(types.A));
+        setText('val-AAAA', formatNum(types.AAAA));
+        setText('val-PTR', formatNum(types.PTR));
+        setText('val-SRV', formatNum(types.SRV));
+        setText('val-unique', formatNum(q.unique_domains));
+        ['A','AAAA','PTR','SRV'].forEach(t => {
+            const bar = document.getElementById('bar-' + t);
+            if (bar) bar.style.width = Math.floor(((types[t]||0)/maxType)*120) + 'px';
+        });
+
+        // Resolution ratios
+        const cached = q.cached || 0;
+        const forwarded = q.forwarded || 0;
+        const blocked2 = q.blocked || 0;
+        const inprog = (q.status || {}).IN_PROGRESS || 0;
+        const resTotal = Math.max(cached + forwarded + blocked2 + inprog, 1);
+
+        setText('cached-val', formatNum(cached));
+        setText('forwarded-val', formatNum(forwarded));
+        setText('blocked-val2', formatNum(blocked2));
+        setText('inprogress-val', formatNum(inprog));
+        setBar('cached-bar', (cached/resTotal)*100);
+        setBar('forwarded-bar', (forwarded/resTotal)*100);
+        setBar('blocked-bar2', (blocked2/resTotal)*100);
+        setBar('inprogress-bar', (inprog/resTotal)*100);
+
+        // Gravity
+        setText('gravity-domains', formatNum(g.domains_being_blocked));
+        if (g.last_update) setText('gravity-updated', 'Blocklist last updated: ' + timeAgo(g.last_update));
+
+        // Clients
+        setText('clients-total', c.total || '--');
+        setText('clients-active2', c.active || '--');
+        const clientPct = c.total ? (c.active/c.total)*100 : 0;
+        setBar('clients-active-bar', clientPct);
+
+        // Reply types
+        const r = q.replies || {};
+        setText('reply-IP', formatNum(r.IP));
+        setText('reply-CNAME', formatNum(r.CNAME));
+        setText('reply-NODATA', formatNum(r.NODATA));
+        setText('reply-NXDOMAIN', formatNum(r.NXDOMAIN));
+        setText('reply-DOMAIN', formatNum(r.DOMAIN));
+        const other = (r.UNKNOWN||0)+(r.RRNAME||0)+(r.BLOB||0)+(r.OTHER||0);
+        setText('reply-OTHER', formatNum(other));
+
+        // Last update
+        const now = new Date().toTimeString().split(' ')[0];
+        setText('last-update', 'LAST UPDATE: ' + now);
+
+        // Log
+        const blocked_pct = (q.percent_blocked||0).toFixed(1);
+        addLog(`SCAN COMPLETE · ${formatNum(total)} queries · ${blocked_pct}% blocked · ${c.active} clients active`);
+
+    } catch(e) {
+        addLog('Connection error: ' + e.message, 'err');
+    }
+}
+
+// Initial load + interval
+addLog('Pi-hole API connection established');
+addLog('Tailscale VPN tunnel active');
+addLog('UFW firewall rules loaded');
+updateStats();
+setInterval(updateStats, 5000);
+</script>
+</body>
+</html>

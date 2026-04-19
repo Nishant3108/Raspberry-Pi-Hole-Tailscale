@@ -1,0 +1,22 @@
+services:
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    network_mode: host
+    environment:
+      TZ: '[COUNTRY]/[STATE]/[CITY]' # can change it to your timezone!
+      WEBPASSWORD: '[YOURPASSWORD]' # needs to be updated!!
+      FTLCONF_LOCAL_IPV4: '192.168.12.100'
+      FTLCONF_webserver_api_max_sessions: '100'
+    volumes:
+      - './etc-pihole:/etc/pihole'
+      - './etc-dnsmasq.d:/etc/dnsmasq.d'
+    restart: unless-stopped
+
+  dashboard:
+    container_name: dashboard
+    build: /home/[username]/dashboard # use your username!!
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - pihole
